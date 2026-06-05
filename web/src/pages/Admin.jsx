@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { useGroups } from '../context/GroupContext.jsx';
@@ -42,6 +42,40 @@ function PasswordModal({ user, onClose }) {
           {busy ? 'Đang lưu…' : 'Cập nhật'}
         </button>
       </form>
+    </Modal>
+  );
+}
+
+function DeleteUserModal({ user, onClose, onDeleted }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  async function confirm() {
+    setBusy(true);
+    try {
+      await api.prediction(`/admin/users/${user.id}`, { method: 'DELETE' });
+      toast.success(`Đã xóa tài khoản ${user.display_name}`);
+      onDeleted();
+      onClose();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`Xóa tài khoản — ${user.display_name}`} onClose={onClose}>
+      <p style={{ marginBottom: 16 }}>
+        Bạn có chắc muốn xóa tài khoản <strong>{user.display_name}</strong> ({user.username})?
+        Hành động này không thể hoàn tác.
+      </p>
+      <div className="inline-form" style={{ justifyContent: 'flex-end', gap: 8 }}>
+        <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Hủy</button>
+        <button className="btn btn-danger" onClick={confirm} disabled={busy}>
+          {busy ? 'Đang xóa…' : 'Xóa tài khoản'}
+        </button>
+      </div>
     </Modal>
   );
 }
@@ -343,11 +377,198 @@ function ResultsManager() {
   );
 }
 
+function FixtureTestPanel() {
+  const [startInput, setStartInput] = useState('');
+  const [endInput, setEndInput] = useState('');
+  const [topX, setTopX] = useState(7);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [showExplain, setShowExplain] = useState(false);
+
+  const fixtures = useFetch(
+    () => api.fixture('/fixtures'),
+    [],
+    { refreshInterval: autoRefresh ? 60000 : undefined },
+  );
+
+  const filtered = useMemo(() => {
+    const all = fixtures.data || [];
+    const startDate = startInput ? new Date(startInput) : null;
+    const endDate = endInput ? new Date(endInput) : null;
+    return all
+      .filter((m) => {
+        const kick = new Date(m.kickoff_at);
+        if (startDate && kick < startDate) return false;
+        if (endDate && kick > endDate) return false;
+        return true;
+      })
+      .slice(0, topX);
+  }, [fixtures.data, startInput, endInput, topX]);
+
+  const total = (fixtures.data || []).length;
+
+  return (
+    <div className="panel">
+      <div className="panel-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3>Kiểm tra Fixtures (Test Panel)</h3>
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => setShowExplain((v) => !v)}
+        >
+          {showExplain ? 'Ẩn giải thích ▴' : 'Xem cách hoạt động ▾'}
+        </button>
+      </div>
+
+      {showExplain && (
+        <div style={{
+          background: 'var(--panel-2)',
+          border: '1px solid var(--line)',
+          borderLeft: '3px solid var(--brand)',
+          borderRadius: 'var(--radius-sm)',
+          padding: '14px 16px',
+          marginBottom: 16,
+          fontSize: 13,
+          lineHeight: 1.6,
+        }}>
+          <p style={{ fontWeight: 700, marginBottom: 10, fontSize: 14 }}>useFetch hoạt động như thế nào?</p>
+          <p style={{ marginBottom: 8 }}>
+            <strong>A — Mount lần đầu:</strong> Hook gọi loader ngay khi component mount, đặt{' '}
+            <code>loading: true</code>, chờ promise, rồi lưu data và tắt spinner. Gọi{' '}
+            <code>useFetch(() =&gt; api.fixture('/fixtures'), [])</code> nghĩa là chạy GET{' '}
+            <code>/fixtures</code> một lần ngay khi panel xuất hiện.
+          </p>
+          <p style={{ marginBottom: 8 }}>
+            <strong>B — deps array:</strong> <code>deps = []</code> → loader chỉ chạy 1 lần lúc mount.
+            Nếu truyền biến vào deps (ví dụ <code>[groupId]</code>), hook tự fetch lại mỗi khi biến đó thay đổi
+            — giống <code>useEffect</code>.
+          </p>
+          <p style={{ marginBottom: 8 }}>
+            <strong>C — Auto-refresh (setInterval):</strong> Nếu truyền{' '}
+            <code>{'{ refreshInterval: 60000 }'}</code>, hook dùng <code>setInterval</code> gọi fetch ngầm
+            mỗi 60 giây. Lỗi trong lần refresh ngầm bị bỏ qua. Loading spinner <em>không</em> hiện trong
+            các lần refresh ngầm. Bật checkbox bên dưới để thấy điều này hoạt động trực tiếp.
+          </p>
+          <p>
+            <strong>D — reload():</strong> Hook trả về hàm <code>reload()</code>. Gọi nó từ button để
+            fetch thủ công — lần này <em>có</em> hiện spinner. Nút "↻ Tải lại" bên dưới dùng cách này.
+          </p>
+        </div>
+      )}
+
+      <div className="inline-form" style={{ alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}>
+          <input
+            type="checkbox"
+            checked={autoRefresh}
+            onChange={(e) => setAutoRefresh(e.target.checked)}
+            style={{ width: 'auto' }}
+          />
+          Auto-refresh mỗi 60 giây
+        </label>
+        {autoRefresh && (
+          <span style={{ fontSize: 12, color: 'var(--brand)', fontWeight: 600 }}>
+            ● Đang tự động tải lại
+          </span>
+        )}
+        <button className="btn btn-secondary btn-sm" onClick={fixtures.reload} disabled={fixtures.loading}>
+          {fixtures.loading ? 'Đang tải…' : '↻ Tải lại'}
+        </button>
+        {total > 0 && (
+          <span style={{ fontSize: 12, color: 'var(--text-mute)' }}>{total} trận tổng</span>
+        )}
+      </div>
+
+      <div className="inline-form" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+        <label className="field" style={{ flex: 1, minWidth: 200 }}>
+          <span>Từ (giờ VN, UTC+7)</span>
+          <input
+            type="datetime-local"
+            value={startInput}
+            onChange={(e) => setStartInput(e.target.value)}
+          />
+        </label>
+        <label className="field" style={{ flex: 1, minWidth: 200 }}>
+          <span>Đến (giờ VN, UTC+7)</span>
+          <input
+            type="datetime-local"
+            value={endInput}
+            onChange={(e) => setEndInput(e.target.value)}
+          />
+        </label>
+        <label className="field" style={{ minWidth: 110, maxWidth: 140 }}>
+          <span>Top X trận</span>
+          <input
+            type="number" min="1" max="100"
+            value={topX}
+            onChange={(e) => setTopX(Math.max(1, parseInt(e.target.value, 10) || 1))}
+          />
+        </label>
+      </div>
+
+      {fixtures.loading ? (
+        <div className="loading">Đang tải fixtures…</div>
+      ) : fixtures.error ? (
+        <div className="loading">Lỗi: {fixtures.error.message}</div>
+      ) : (
+        <>
+          <p className="hint" style={{ marginBottom: 8 }}>
+            Hiển thị <strong>{filtered.length}</strong> / {total} trận
+            {(startInput || endInput) && ' (đã lọc theo khoảng thời gian)'}
+          </p>
+          {filtered.length === 0 ? (
+            <div className="hint" style={{ padding: '10px 0' }}>
+              Không có trận nào trong khoảng thời gian này.
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', padding: '6px 8px', width: 32 }}>#</th>
+                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Trận</th>
+                  <th style={{ textAlign: 'center', padding: '6px 8px' }}>Kick-off (giờ VN)</th>
+                  <th style={{ textAlign: 'center', padding: '6px 8px' }}>Trạng thái</th>
+                  <th style={{ textAlign: 'center', padding: '6px 8px' }}>Vòng</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((m, i) => (
+                  <tr key={m.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '8px', color: 'var(--text-mute)', fontSize: 12 }}>{i + 1}</td>
+                    <td style={{ padding: '8px' }}>
+                      <strong>{m.home_team}</strong>
+                      <span style={{ margin: '0 6px', color: 'var(--muted)' }}>vs</span>
+                      <strong>{m.away_team}</strong>
+                      {m.group_code && (
+                        <span className="badge" style={{ marginLeft: 8, fontSize: 11 }}>
+                          {m.group_code}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'center', padding: '8px', fontSize: '0.85em', color: 'var(--text-dim)' }}>
+                      {formatDateTime(m.kickoff_at)}
+                    </td>
+                    <td style={{ textAlign: 'center', padding: '8px' }}>
+                      <span className="badge">{m.status}</span>
+                    </td>
+                    <td style={{ textAlign: 'center', padding: '8px', fontSize: '0.85em', color: 'var(--text-dim)' }}>
+                      ×{m.round_multiplier}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Admin() {
   const navigate = useNavigate();
   const { groups, refresh: refreshGroups } = useGroups();
   const users = useFetch(() => api.prediction('/admin/users'), []);
   const [pwUser, setPwUser] = useState(null);
+  const [deleteUser, setDeleteUser] = useState(null);
   const [creating, setCreating] = useState(false);
 
   const userColumns = [
@@ -362,10 +583,18 @@ export function Admin() {
     {
       key: 'actions', label: '', align: 'right',
       render: (u) => (
-        <button className="btn btn-secondary btn-sm"
-          onClick={(e) => { e.stopPropagation(); setPwUser(u); }}>
-          Đổi mật khẩu
-        </button>
+        <div className="inline-form" style={{ justifyContent: 'flex-end', gap: 6 }}>
+          <button className="btn btn-secondary btn-sm"
+            onClick={(e) => { e.stopPropagation(); setPwUser(u); }}>
+            Đổi mật khẩu
+          </button>
+          {!u.is_admin && (
+            <button className="btn btn-danger btn-sm"
+              onClick={(e) => { e.stopPropagation(); setDeleteUser(u); }}>
+              Xóa
+            </button>
+          )}
+        </div>
       ),
     },
   ];
@@ -404,7 +633,17 @@ export function Admin() {
       <div className="section-title" style={{ marginTop: 28 }}>Kết quả trận đấu</div>
       <ResultsManager />
 
+      <div className="section-title" style={{ marginTop: 28 }}>Kiểm tra Fixtures (Test Panel)</div>
+      <FixtureTestPanel />
+
       {pwUser && <PasswordModal user={pwUser} onClose={() => setPwUser(null)} />}
+      {deleteUser && (
+        <DeleteUserModal
+          user={deleteUser}
+          onClose={() => setDeleteUser(null)}
+          onDeleted={users.reload}
+        />
+      )}
       {creating && <CreateGroupModal onClose={() => setCreating(false)} onCreated={refreshGroups} />}
     </div>
   );

@@ -34,6 +34,23 @@ def list_users(session: Session = Depends(get_session)) -> list[User]:
     return session.query(User).order_by(User.created_at).all()
 
 
+@router.delete("/users/{user_id}", status_code=204)
+def delete_user(
+    user_id: str,
+    session: Session = Depends(get_session),
+) -> Response:
+    """Admin affordance: permanently delete a user and their group memberships."""
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    if user.is_admin:
+        raise HTTPException(status_code=400, detail="cannot delete an admin account")
+    session.query(GroupMember).filter_by(user_id=user_id).delete()
+    session.delete(user)
+    session.commit()
+    return Response(status_code=204)
+
+
 @router.put("/users/{user_id}/password", status_code=204)
 def reset_password(
     user_id: str,
